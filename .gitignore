@@ -1,0 +1,31 @@
+# package directories
+node_modules
+jspm_packages
+
+# Serverless directories
+.serverless
+
+# esbuild directories
+.esbuild
+
+docker
+lib
+
+.envrc
+*.env
+
+# Misc
+.DS_Store
+
+# Error logs
+yarn-error.log
+
+# Terraform
+backend.conf
+*.lock.hcl
+.terraform
+
+# DB
+postgres
+
+src/resolvers/queries/dft_traffic_counts_aadf_by_direction.csv

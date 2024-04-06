@@ -1,0 +1,265 @@
+name: Test and deploy app
+
+on:
+  pull_request:
+    branches:
+      - main
+      - staging
+    types: [closed]
+
+env:
+  # AWS
+  AWS_ACCESS_KEY_ID: ${{ secrets.TF_VAR_aws_access_key_id }}
+  TF_VAR_aws_access_key_id: ${{ secrets.TF_VAR_aws_access_key_id }}
+  AWS_SECRET_ACCESS_KEY: ${{ secrets.TF_VAR_aws_secret_access_key }}
+  TF_VAR_aws_secret_access_key: ${{ secrets.TF_VAR_aws_secret_access_key }}
+
+  # Postgres
+  POSTGRES_URL: ${{secrets.POSTGRES_URL}}
+
+  # Application related
+  ALLOWED_ORIGINS: ${{secrets.ALLOWED_ORIGINS}}
+  NODE_ENV: ${{secrets.NODE_ENV}}
+  APP_SECRET: ${{secrets.APP_SECRET}}
+
+  # Serverless config
+  NODE_VERSION: ${{secrets.NODE_VERSION || 20}}
+  DOMAIN_SECURITY_POLICY: ${{secrets.DOMAIN_SECURITY_POLICY}}
+
+  # Terraform
+  TF_VAR_region: ${{secrets.TF_VAR_region}}
+  TF_VAR_domain_name: ${{secrets.TF_VAR_domain_name}}
+  TF_VAR_tld_zone_id: ${{secrets.TF_VAR_tld_zone_id}}
+  TF_VAR_environment: ${{endsWith(github.ref_name, 'main') && 'production' || endsWith(github.ref_name, 'staging') && 'staging' || 'dev'}}
+
+  # Terraform backend (THESE MUST BE VARS AND NOT SECRETS)
+  BACKEND_BUCKET_NAME: ${{vars.BACKEND_BUCKET_NAME}}
+  BACKEND_TABLE_NAME: ${{vars.BACKEND_TABLE_NAME}}
+  BACKEND_REGION: ${{vars.BACKEND_REGION}}
+  SERVICE_NAME: ${{vars.SERVICE_NAME}}
+  NAMESPACE: ${{vars.NAMESPACE}}
+
+jobs:
+  logger:
+    name: 💾 (Useful) Log github related information
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: ✨ "'Beautify' branch names"
+        id: branch-names
+        uses: tj-actions/branch-names@v8
+
+      - name: 🎯 Get the branch name of the target of a PR
+        run: |
+          echo "TARGET_BRANCH_PR=${{ steps.branch-names.outputs.base_ref_branch }}" >> $GITHUB_ENV
+
+      - name: 📜 Log PR info
+        run: 'echo "Merged: ${{github.event.pull_request.merged}}" PR Title: ${{github.event.pull_request.title}}'
+
+      - name: 📜 Log commit info
+        run: 'echo "Head commit message: ${{github.event.head_commit.message}}" Commits[0] message: ${{github.event.commits[0].message}} '
+
+      - name: 📜 Log ref and PR Target Branch
+        run: 'echo "Github ref: ${{github.ref}}" PR Target: ${{env.TARGET_BRANCH_PR}}'
+
+  # IMPORTANT: If you want to run cleanup just commit and update the version with a message that contains the value of vars.DESTROY_KEYWORD (case-insensitive)
+  cleanup:
+    name: 🧹 Clean up
+    runs-on: ubuntu-latest
+    if: ${{ vars.DESTROY_KEYWORD && ((startsWith(github.event.pull_request.title, vars.DESTROY_KEYWORD) && github.event.pull_request.merged) || (startsWith(github.event.head_commit.message, 'v') && startsWith(github.event.commits[0].message, vars.DESTROY_KEYWORD)) || startsWith(github.event.head_commit.message, vars.DESTROY_KEYWORD)) }}
+
+    steps:
+      - name: ⬇️ Checkout repo
+        uses: actions/checkout@v4
+
+      - name: ⚙️ Setup node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "${{ env.NODE_VERSION }}.x"
+
+      - name: 📥 Install deps
+        run: yarn install --immutable
+
+      - name: 🏴‍☠️ (Serverless) Remove
+        uses: serverless/github-action@v3.2
+        with:
+          args: remove --stage ${{env.TF_VAR_environment}}
+        env:
+          # SERVERLESS_ACCESS_KEY: ${{ secrets.SERVERLESS_ACCESS_KEY }}
+
+          # or if using AWS credentials directly
+          AWS_ACCESS_KEY_ID: ${{ env.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ env.AWS_SECRET_ACCESS_KEY }}
+
+      - name: 💿 (Terraform) Terraform Setup
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
+      - name: 🔩 Set config
+        env:
+          KEY: "${{ env.NAMESPACE }}/${{ env.TF_VAR_environment }}/${{ env.SERVICE_NAME }}.terraform.tfstate"
+        run: |
+          echo "CONFIG_ARGS=-backend-config="bucket=${{ env.BACKEND_BUCKET_NAME }}" -backend-config="dynamodb_table=${{ env.BACKEND_TABLE_NAME }}" -backend-config="region=${{ env.BACKEND_REGION }}" -backend-config="key=${{ env.KEY }}"" >> $GITHUB_ENV
+
+      - name: 🔩 Set up AWS CLI
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{env.TF_VAR_aws_access_key_id}}
+          aws-secret-access-key: ${{env.TF_VAR_aws_secret_access_key}}
+          aws-region: ${{env.TF_VAR_region}}
+
+      - name: 🏁 (Terraform) Init
+        working-directory: terraform
+        run: terraform init $CONFIG_ARGS
+
+      - name: 📄 (Terraform) Format
+        working-directory: terraform
+        run: terraform fmt -recursive
+
+      - name: ✅ (Terraform) Validate
+        working-directory: terraform
+        run: terraform validate -no-color
+
+      - name: 🔄 (Terraform) Refresh
+        working-directory: terraform
+        run: terraform refresh -no-color
+
+      - name: 💥 (Terraform) Destroy
+        run: terraform destroy -auto-approve -no-color
+
+      - name: 🗑️ Remove NS Record from app subdomain
+        run: |
+          chmod +x ./scripts/remove_ns_record_from_hz.sh
+          ./scripts/remove_ns_record_from_hz.sh
+        shell: bash
+
+      - name: 🗑️ Remove Environment Subdomain
+        run: |
+          chmod +x ./scripts/delete_hz.sh
+          ./scripts/delete_hz.sh
+        shell: bash
+
+  test:
+    name: 🧪 Test
+    if: ${{ !startsWith(github.event.pull_request.title, vars.DESTROY_KEYWORD) && !startsWith(github.event.head_commit.message, vars.DESTROY_KEYWORD) && !startsWith(github.event.commits[0].message, vars.DESTROY_KEYWORD) }}
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16.2
+        env:
+          POSTGRES_PASSWORD: password
+          POSTGRES_DB: city-science-db
+        ports:
+          - 5432:5432
+
+    steps:
+      - name: ⬇️ Checkout repo
+        uses: actions/checkout@v4
+
+      - name: ⚙️ Setup node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "${{ env.NODE_VERSION }}.x"
+
+      - name: 📥 Install deps
+        run: yarn install --immutable
+
+      - name: 🧹 Lint
+        run: yarn lint
+
+      - name: 🔍 Typecheck
+        run: yarn typecheck
+
+      - name: 🧪 Run tests
+        env:
+          POSTGRES_URL_TEST: postgres://postgres:password@localhost:5432/city-science-db?sslmode=disable
+        run: yarn ci:test:all
+
+  deploy:
+    if: ${{ !startsWith(github.event.pull_request.title, vars.DESTROY_KEYWORD) && !startsWith(github.event.head_commit.message, vars.DESTROY_KEYWORD) && !startsWith(github.event.commits[0].message, vars.DESTROY_KEYWORD) }}
+    name: 🚀 Deploy
+    runs-on: ubuntu-latest
+    needs: test
+
+    steps:
+      - name: ⬇️ Checkout repo
+        uses: actions/checkout@v4
+
+      - name: ✨ "'Beautify' branch names"
+        id: branch-names
+        uses: tj-actions/branch-names@v8
+
+      - name: 🎯 Get the branch name of the target of a PR
+        run: |
+          echo "TARGET_BRANCH_PR=${{ steps.branch-names.outputs.base_ref_branch }}" >> $GITHUB_ENV
+
+      - name: ⚙️ Setup node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "${{ env.NODE_VERSION }}.x"
+
+      - name: 📥 Install deps
+        run: yarn install  --immutable
+
+      - name: 🧹 Lint
+        run: yarn lint
+
+      - name: 🔍 Typecheck
+        run: yarn typecheck
+
+      - name: 💿 (Terraform) Terraform Setup
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
+      - name: 🔩 Set config
+        env:
+          KEY: "${{ env.NAMESPACE }}/${{ env.TF_VAR_environment }}/${{ env.SERVICE_NAME }}.terraform.tfstate"
+        run: |
+          echo "CONFIG_ARGS=-backend-config="bucket=${{ env.BACKEND_BUCKET_NAME }}" -backend-config="dynamodb_table=${{ env.BACKEND_TABLE_NAME }}" -backend-config="region=${{ env.BACKEND_REGION }}" -backend-config="key=${{ env.KEY }}"" >> $GITHUB_ENV
+
+      - name: 🔩 Set up AWS CLI
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{env.TF_VAR_aws_access_key_id}}
+          aws-secret-access-key: ${{env.TF_VAR_aws_secret_access_key}}
+          aws-region: ${{env.TF_VAR_region}}
+
+      - name: 🏁 (Terraform) Init
+        working-directory: terraform
+        run: terraform init $CONFIG_ARGS
+
+      - name: 📄 (Terraform) Format
+        working-directory: terraform
+        run: terraform fmt -recursive
+
+      - name: ✅ (Terraform) Validate
+        working-directory: terraform
+        run: terraform validate -no-color
+
+      - name: 🔄 (Terraform) Refresh
+        working-directory: terraform
+        run: terraform refresh -no-color
+
+      - name: 📋 (Terraform) Plan
+        working-directory: terraform
+        run: terraform plan -no-color
+
+      - name: 🛠️ (Terraform) Apply
+        working-directory: terraform
+        run: terraform apply -auto-approve -no-color
+
+      - name: 🚀 (Serverless) Deploy
+        # Will run only on a closed (merged) PR on main or staging
+        if: ${{ github.event.pull_request.merged && (endsWith(env.TARGET_BRANCH_PR, 'main') || endsWith(env.TARGET_BRANCH_PR, 'staging')) }}
+        uses: serverless/github-action@v3.2
+        with:
+          args: deploy --stage ${{env.TF_VAR_environment}}
+        env:
+          # SERVERLESS_ACCESS_KEY: ${{ secrets.SERVERLESS_ACCESS_KEY }}
+
+          # or if using AWS credentials directly
+          AWS_ACCESS_KEY_ID: ${{ env.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ env.AWS_SECRET_ACCESS_KEY }}

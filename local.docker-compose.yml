@@ -1,0 +1,34 @@
+version: "3.9"
+
+services:
+  postgres:
+    image: postgres:16.2
+    shm_size: 128mb
+    container_name: DevPostgres
+    restart: always
+    environment:
+      - POSTGRES_PASSWORD=password
+      - POSTGRES_DB=city-science-db
+    ports:
+      - 5432:5432
+    volumes:
+      - ./postgres:/var/lib/postgresql/data
+  postgres-test:
+    image: postgres:16.2
+    shm_size: 128mb
+    container_name: TestingPostgres
+    restart: always
+    environment:
+      - POSTGRES_PASSWORD=password
+      - POSTGRES_DB=city-science-db
+    ports:
+      - 5435:5432
+  # Optional - enable locally if needed
+  adminer:
+    image: adminer
+    restart: always
+    ports:
+      - 8080:8080
+volumes:
+  postgres:
+    driver: local

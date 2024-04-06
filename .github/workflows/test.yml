@@ -1,0 +1,75 @@
+name: Test source code
+
+on:
+  push:
+    branches-ignore:
+      - main
+      - staging
+
+env:
+  # Application related
+  ALLOWED_ORIGINS: ${{secrets.ALLOWED_ORIGINS}}
+  NODE_ENV: ${{secrets.NODE_ENV}}
+  APP_SECRET: ${{secrets.APP_SECRET}}
+
+  # Serverless config
+  NODE_VERSION: ${{secrets.NODE_VERSION || 20}}
+
+jobs:
+  logger:
+    name: 💾 (Useful) Log github related information
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: ✨ "'Beautify' branch names"
+        id: branch-names
+        uses: tj-actions/branch-names@v8
+
+      - name: 🎯 Get the branch name of the target of a PR
+        run: |
+          echo "TARGET_BRANCH_PR=${{ steps.branch-names.outputs.base_ref_branch }}" >> $GITHUB_ENV
+
+      - name: 📜 Log PR info
+        run: 'echo "Merged: ${{github.event.pull_request.merged}}" PR Title: ${{github.event.pull_request.title}}'
+
+      - name: 📜 Log commit info
+        run: 'echo "Head commit message: ${{github.event.head_commit.message}}" Commits[0] message: ${{github.event.commits[0].message}} '
+
+      - name: 📜 Log ref and PR Target Branch
+        run: 'echo "Github ref: ${{github.ref}}" PR Target: ${{env.TARGET_BRANCH_PR}}'
+
+  test:
+    name: 🧪 Test
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16.2
+        env:
+          POSTGRES_PASSWORD: password
+          POSTGRES_DB: city-science-db
+        ports:
+          - 5432:5432
+
+    steps:
+      - name: ⬇️ Checkout repo
+        uses: actions/checkout@v4
+
+      - name: ⚙️ Setup node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "${{ env.NODE_VERSION }}.x"
+
+      - name: 📥 Install deps
+        run: yarn install --immutable
+
+      - name: 🧹 Lint
+        run: yarn lint
+
+      - name: 🔍 Typecheck
+        run: yarn typecheck
+
+      - name: 🧪 Run tests
+        env:
+          POSTGRES_URL_TEST: postgres://postgres:password@localhost:5432/city-science-db?sslmode=disable
+        run: yarn ci:test:all
