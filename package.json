@@ -1,6 +1,6 @@
 {
   "name": "aws-serverless-typescript-graphql-api",
-  "version": "1.1.40",
+  "version": "1.1.41",
   "author": "Kristiyan Doykov (kdoykov99@gmail.com)",
   "license": "MIT",
   "description": "Serverless aws-nodejs-typescript GraphQL API",
