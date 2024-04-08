@@ -33,6 +33,28 @@ In order to work with the sample project locally:
 5.  Query using your own client (either Insomnia/Postman or a local React/Remix/Next client)
 6.  Once you're done developing make sure to run the `yarn docker:down` command in order to stop your local db and Adminer instances.
 
+### Sample workflow:
+
+One way to go about your development workflow could be to:
+
+1. Develop locally, push to a feature branch.
+2. This will run the testing pipeline and ensure your code is ready to go.
+3. If step 2 succeeds and you're ready to get your changes into `staging` - create a PR from the feature branch into the `staging` branch and merge the PR.
+4. This will run the "test and deploy" pipeline and ensure your deployment gets to the `staging` environment.
+5. Repeat steps 1-4 until you're happy with the outcome.
+6. Once you're content with the current `staging` version - create a PR from the `staging` branch into `main` and merge the PR.
+7. The "test and deploy" pipeline will be run again, deploying your code to `production`.
+
+And here's what you would do to ensure all environments are properly destroyed:
+
+1. Run `yarn destroy` if you've ever deployed using your local enviornment (the `dev` stage) and the `yarn deploy` command.
+2. Make a commit to a feature branch with a message equal to `env.DESTROY_KEYWORD`.
+3. Create a PR from your feature branch into the `staging` branch, ensuring the PR title is equal to `env.DESTROY_KEYWORD` and merge this PR (you will again be asked to give a title to your PR upon accepting the merge so ensure that is also equal to `env.DESTROY_KEYWORD`).
+4. The `cleanup` job will be run on the `staging` branch and if successful - the staging deployment will be removed.
+5. Create a PR with with a title equal to `env.DESTROY_KEYWORD` from the `staging` branch into `main` and merge it (once again with a message equal to `env.DESTROY_KEYWORD`).
+6. The `cleanup` job is run again, this time on the `production` environment, ensuring that gets deleted as well.
+7. The bash scripts in the `scripts` folder will ensure to remove any leftover entities from the likes of AWS Route53 (such as hosted zones, etc.).
+
 ## Testing
 
 This project employs both unit and integration tests using Jest, with the two configs being located in the root of the project (`jest.int.config.ts` and `jest.unit.config.ts`).
