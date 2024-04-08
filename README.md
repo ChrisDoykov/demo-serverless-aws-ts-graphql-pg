@@ -1,9 +1,5 @@
 # AWS Serverless Node Typescript GraphQL API
 
-<!-- TODO: -->
-<!-- Run the whole flow there as well as an example -->
-<!-- Write LinkedIn article and post -->
-
 This is a sample repo which showcases what a production-ready setup might look like when deploying to AWS using Serverless for a GraphQL-based Node API, written in Typescript.
 
 There is also a built-in database connection (in this case I've chosen Postgres using Sequelize) which is established using a singleton pattern, outside of the Lambda handlers in order to re-use the connection across function calls.
@@ -78,6 +74,8 @@ In CI/CD we must also have a Postgres instance spun up before the testing step t
 ## Deployment
 
 The application can be deployed using `yarn deploy` which will take care of creating the necessary Terraform state and deploying the Serverless app to AWS.
+
+When making your commits, you should use sem-ver (for example by calling `yarn version --patch | minor | major`) and then pushing to the remote branch.
 
 The CI/CD pipeline for simply testing the source code will be activated when a commit to any branch other than `staging` or `main` is made.
 
