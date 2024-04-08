@@ -23,7 +23,7 @@ Here is a breakdown of each technology and why I've chosen it:
 In order to work with the sample project locally:
 
 1.  Run the `yarn install` command to install dependencies.
-2.  (ONCE) Download the sample CSV with demo data for the example format from (here)[https://drive.google.com/file/d/1ejUBQGkehWtP_BD_Tg8Jg4Z7gzeVRnHL/view?usp=sharing] and place it inside of the `src/resolvers/queries` folder.
+2.  (ONCE) Download the sample CSV with demo data for the example format from [here](https://drive.google.com/file/d/1ejUBQGkehWtP_BD_Tg8Jg4Z7gzeVRnHL/view?usp=sharing) and place it inside of the `src/resolvers/queries` folder.
 3.  (ONCE) Run the `yarn local:seed-db` command to seed some traffic data into your local db.
 4.  Run the `yarn dev` command which will spin up local Adminer and Postgres instances.
 5.  Query using your own client (either Insomnia/Postman or a local React/Remix/Next client)
